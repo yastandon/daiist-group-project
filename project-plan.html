@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Damage Claim Triage - Project Plan</title>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; max-width: 760px; margin: 40px auto; line-height: 1.5; color: #1a1a1a; }
+  h1 { font-size: 26px; margin-bottom: 2px; }
+  h2 { font-size: 19px; margin-top: 28px; color: #16324f; }
+  h3 { font-size: 15px; margin-top: 18px; color: #16324f; }
+  p.sub { color: #555; margin-top: 0; }
+  li { margin-bottom: 4px; }
+</style>
+</head>
+<body>
+
+<h1>Damage Claim Triage - Project Plan and Work Division</h1>
+<p class="sub">Team: Lucas, Phillip, Manu, Yasmin, Eva<br>
+Final submission: Monday 30 November, 23:59 &middot; Presentation: 1&ndash;3 December</p>
+
+<h2>The product</h2>
+<p>A claims-triage assistant. The user uploads a photo of a damaged parcel or product together with a short claim description. Component A (vision, Roboflow hosted model or Gemini Vision API) classifies the damage type and severity with a confidence score. Component B (Gemini LLM) takes the vision output and the claim text and drafts a decision (approve, deny or escalate) with a customer reply. Low-confidence or high-value cases are flagged for human review.</p>
+<p><b>Baseline to beat:</b> a human agent opens and assesses every claim manually.</p>
+
+<h2>Datasets</h2>
+<p>Both from Roboflow Universe, both CC BY 4.0 (cite them in REPORT.md), used in different roles:</p>
+<ul>
+<li><b>damaged box</b> (universe.roboflow.com/project-33xgh/damaged-box-auh4b): classification, damaged vs. undamaged packages, 1,000 images, with a ready hosted model. This is the day-one vision component: call it through the Roboflow API and the full chain runs immediately.</li>
+<li><b>Damage Parcel</b> (universe.roboflow.com/csc649-w35fl/damage-parcel): instance segmentation, 300 real photos of damaged boxes with tight annotations for Tear and Wet damage. Fork it into our workspace and train a model on Roboflow's free tier. Damage types give the LLM more to reason about (for example wet parcel, likely content damage, approve replacement) and upgrade the vision output from damaged-or-not to damage type plus severity.</li>
+</ul>
+<p>This also gives the model comparison expected from a five-person team: the binary Roboflow model vs. the damage-type Roboflow model vs. Gemini Vision zero-shot, all evaluated on the same test photos.</p>
+<p>The datasets also feed the evaluation files: eval/reference.csv (30+ normal inputs) is sampled from the datasets' images, while our own photos become eval/cases.csv and their darkened or blurred versions eval/shifted.csv. Quality was checked by browsing both Universe pages: the damaged-box set is varied stock-style photos (filenames encode damage subtypes: folded, crushed, burned) and the Damage Parcel set is real photos with tight segmentation masks. Note: some damaged-box images contain people, so filter those out when sampling for reference.csv (no personal data in logs or examples).</p>
+
+<h2>Ownership</h2>
+
+<h3>Yasmin - Vision component and pipeline</h3>
+<ul>
+<li>Compare three vision options on the same test photos and pick one, with evidence: the hosted binary damaged-box model, the forked damage-type model, and Gemini Vision zero-shot.</li>
+<li>Image feature extraction (brightness, confidence) for the drift check, and the drift demo: the alert fires on shifted photos and stays quiet on normal ones, with a justified threshold.</li>
+<li>Integrate both components in pipeline.py, keeping the run() contract the rest of the app reads.</li>
+<li>The reinforcement-learning bonus layer, if the team confirms it at the Step 3 checkpoint (see below).</li>
+</ul>
+
+<h3>Lucas - LLM component and judge</h3>
+<ul>
+<li>Prompt design and versioning for the decision (approve, deny, escalate) and the customer reply.</li>
+<li>The review rule: confidence and value thresholds that send a case to a person.</li>
+<li>The LLM judge for free-text outputs, and token and cost tracking per request.</li>
+</ul>
+
+<h3>Phillip - App, deployment and logging</h3>
+<ul>
+<li>App and Monitoring tabs in app.py: image upload, results display, feedback buttons, charts.</li>
+<li>Render deployment and Postgres logging via logbook.py; monitor.py alert wiring.</li>
+<li>Keep check.py passing throughout.</li>
+</ul>
+
+<h3>Manu - Evaluation code and test data</h3>
+<ul>
+<li>Photograph and collect 30 or more anonymous damage photos (no faces, no addresses).</li>
+<li>Write eval/cases.csv (including 5 hard, 5 review and 3 out-of-scope cases) from our own photos, reference.csv sampled from the Universe datasets' images, shifted.csv (darkened or blurred versions of our photos) and human_labels.csv (20 or more own labels).</li>
+<li>Implement evaluate.py: run every case through the pipeline, compute the component and end-to-end metrics, the judge agreement and the cost per request. Lucas supports on the judge.</li>
+</ul>
+
+<h3>Eva - Business case, report and quality views</h3>
+<ul>
+<li>Business case with baseline, success metric and value in euros; REPORT.md kept up to date throughout.</li>
+<li>Implement the quality-signal charts in monitor.py (share of negative feedback and review rate over time, with Phillip's support) and the failure-analysis code that groups failed cases by cause from the logs.</li>
+<li>CONTRIBUTIONS.md upkeep; presentation script and backup video.</li>
+</ul>
+
+<p>Shared by everyone: the go / no-go decision and the review-rule threshold (argued from the evaluation numbers), and understanding every part of the system, since the professor picks who answers each question in the presentation.</p>
+
+<h2>Reinforcement learning bonus (up to +10%)</h2>
+<p><b>Owner: Yasmin</b>, with Lucas supporting on the prompt variants and Phillip on wiring it into the app.</p>
+<p>The plan: an epsilon-greedy bandit that chooses among two or three reply-style prompt variants (for example formal, concise, empathetic) each time Component B drafts a customer reply, and learns from the thumbs up / thumbs down feedback the app already collects.</p>
+<ul>
+<li><b>Reward:</b> thumbs up = 1, thumbs down = 0, arriving when the user clicks. Risk to document: it rewards replies people like, not replies that are correct, so the bandit only picks the style, never the decision (approve, deny, escalate).</li>
+<li><b>Exploration:</b> epsilon-greedy with a small epsilon (around 0.2 given the low traffic), justified in the report, including what exploring costs the users who get the worse variant.</li>
+<li><b>Warm-up:</b> traffic will be low, so warm the policy up with a simulator and say clearly in REPORT.md which part is simulated and which learning comes from the app's real logs. At least some real feedback must reach the policy for the bonus to count.</li>
+<li><b>Evidence for the demo:</b> the loop visibly closes: feedback in the app, reward, policy update, and the app behaving differently. Log the variant chosen and the policy state on every request so this can be shown from the Monitoring tab.</li>
+<li><b>Risks to write up:</b> feedback loops, who gives feedback and who does not, and calibration.</li>
+</ul>
+<p>Go / no-go on this layer is decided at the Step 3 checkpoint: it is only built if everything in the core plan is on track.</p>
+
+<h2>Steps</h2>
+
+<h3>Step 1 - Foundations</h3>
+<ul>
+<li>All: lock the idea and the business story; Eva drafts the business case.</li>
+<li>Phillip: deploy the untouched template to Render with Postgres right away, so deployment issues surface early rather than just before submission.</li>
+<li>Manu: start the photo shoot (boxes, mugs, electronics; no faces, no addresses).</li>
+<li>Yasmin: run the hosted damaged-box model and Gemini Vision on about 10 photos as a first comparison; fork the damage-type dataset and start its training. Lucas: prompt v1 against mocked vision output.</li>
+</ul>
+
+<h3>Step 2 - Build</h3>
+<ul>
+<li>Yasmin and Lucas: both components integrated in pipeline.py, running end to end on real photos.</li>
+<li>Phillip: real App tab (image upload, decision display, feedback buttons) and Monitoring tab v1.</li>
+<li>Manu: cases.csv and reference.csv complete; evaluate.py running end to end with first numbers.</li>
+<li>Eva: REPORT.md architecture and data sections; first quality-signal chart in the Monitoring tab.</li>
+</ul>
+
+<h3>Step 3 - Checkpoint</h3>
+<ul>
+<li>check.py passes locally and against the Render URL.</li>
+<li>Decide on the reinforcement-learning bonus (see its section above): only if everything else is on track. If yes: Yasmin builds the bandit policy and simulator warm-up, Lucas writes the prompt variants, Phillip wires the variant choice and policy state into the app and the Monitoring tab.</li>
+</ul>
+
+<h3>Step 4 - Evaluate and harden</h3>
+<ul>
+<li>Manu: final evaluation numbers, judge agreement and cost per request from evaluate.py (Lucas supports on the judge).</li>
+<li>Eva: failure analysis from the logs and evaluation results, grouped by cause.</li>
+<li>Yasmin: drift demo; the alert fires on shifted.csv and stays quiet on normal cases, with the threshold justified. If the bonus is on: the bandit learning from the app's real feedback logs, with the simulated warm-up documented.</li>
+<li>All: decision section (review rule, cases per day sent to a human, go / no-go) and REPORT.md complete.</li>
+<li>One member: fresh clone with a clean .env and check.py, to catch any uncommitted file.</li>
+</ul>
+
+<h3>Step 5 - Submit</h3>
+<ul>
+<li>Tag final, push tags, open the PR and submit the links plus a zip on Blackboard, before the Monday 30 November 23:59 deadline. No pushes afterwards except fixes that keep the app running.</li>
+</ul>
+
+<h3>Step 6 - Present</h3>
+<ul>
+<li>Six minutes live: one normal case, one review or failure case, and the Monitoring tab. Open the app a few minutes early (the free Render service sleeps after 15 minutes). Everyone rehearses every part.</li>
+</ul>
+
+<h2>Working rules</h2>
+<ul>
+<li>Log what you did in CONTRIBUTIONS.md as you go, not on the last day.</li>
+<li>Never commit .env or any key; new keys go in Render's Environment page and in .env.example.</li>
+<li>No personal data anywhere: not in photos, logs or test cases.</li>
+<li>Run check.py before pushing anything that touches the pipeline or the evaluation files.</li>
+<li>Cache API outputs in the evaluation; the free Gemini tiers have daily limits.</li>
+</ul>
+
+</body>
+</html>

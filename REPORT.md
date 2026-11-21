@@ -9,7 +9,25 @@
 
 ## Business case
 
-*Who uses it, which decision or task it supports, what happens today without it (the baseline), the success metric, and a rough value in euros with the assumptions behind it.*
+**Who uses it.** The claims team of a mid-size online retailer (home goods and small electronics). When a customer reports that an order arrived damaged, they submit a photo of the item and a short description through the returns portal. A claims agent then has to decide what to do with each case.
+
+**The decision it supports.** For every damage claim: approve (refund or replacement), deny (no visible damage or out of policy), or escalate to a senior agent. The product drafts this decision and the customer reply; the agent stays in the loop for the cases the product is not confident about.
+
+**Baseline (what happens today).** An agent opens every claim manually: looks at the photo, checks the description against the order, decides, and writes a reply. We assume 4–6 minutes per claim end to end. At a fully loaded cost of €25/hour, that is **€1.70–2.50 per claim**, and customers wait 24–48 hours for an answer because claims queue behind other support work.
+
+**Success metric.** Three numbers, measured on `eval/cases.csv` against the baseline:
+
+1. **Decision agreement**: on the claims the product resolves automatically, its approve/deny decision matches the human decision in ≥ 90% of cases.
+2. **Automation rate**: ≥ 50% of claims are resolved without a human (the rest go to review by the confidence/value rule).
+3. **Cost and speed**: < €0.05 and < 30 seconds per claim, versus ~€2 and 24–48 hours today.
+
+**Value in euros.** Assumptions: 100 claims/day, 22 working days/month, 5 minutes of agent time saved per auto-resolved claim, €25/hour loaded agent cost.
+
+- Agent time saved: 100 × 50% × 5 min = ~4.2 hours/day ≈ **€2,300/month**.
+- API and hosting cost at that volume: roughly €15–30/month (Gemini calls at ~€0.01/claim plus hosting), i.e. ~1% of the saving.
+- Not quantified but real: faster answers on damage claims measurably reduce chargebacks and repeat contacts; wrongly approved claims cost on average ~€35 (the refund), which is why claims above a value threshold always go to a person regardless of model confidence.
+
+The go/no-go decision in the last section returns to these numbers with the measured results.
 
 ## Architecture
 
