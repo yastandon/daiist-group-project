@@ -24,13 +24,18 @@ of eval/cases.csv uses the same convention.
 
 from pathlib import Path
 
+import decision
+
 VERSIONS = {
     "component_a": "placeholder-keywords-v0",
-    "component_b": "placeholder-template-v0",
+    "component_b": decision.VERSION,  # overwritten per request with the model that answered
 }
 
-# Placeholder thresholds. Yours must be justified in REPORT.md.
-REVIEW_BELOW_CONFIDENCE = 0.6
+# Review rule: a case goes to a person when ANY of these holds.
+# PROPOSED values, to be agreed by the team and justified in REPORT.md with the evaluation numbers.
+REVIEW_BELOW_CONFIDENCE = 0.7   # component A is unsure (same 0.7 as in prompts/decision_v1.txt)
+REVIEW_ABOVE_VALUE_EUR = 100.0  # a wrong approval above this costs more than an agent's review
+# ...or component B chose "escalate", said the request is out of scope, or the LLM call failed.
 
 _NEGATIVE = {"broken", "late", "missing", "wrong", "refund", "bad", "problem", "error"}
 _POSITIVE = {"thanks", "great", "perfect", "fine", "good", "works"}
@@ -65,27 +70,36 @@ def component_a(text: str) -> dict:
     return {"label": label, "confidence": round(confidence, 3)}
 
 
-def component_b(text: str, a: dict) -> dict:
-    """PLACEHOLDER second component: uses component A's output to write a reply."""
-    replies = {
-        "complaint": "We are sorry about the problem. We will contact you within 48 hours.",
-        "no_issue": "Thank you for your message. No action is needed.",
-        "unclear": "Thank you. A member of the team will review your message.",
-    }
-    return {"reply": replies[a["label"]], "tokens": 0}
+def component_b(claim_text: str, a: dict, claim_value_eur: float | None = None) -> dict:
+    """Component B (decision.py): Gemini drafts approve / deny / escalate and the customer reply from A's output."""
+    return decision.decide(a, claim_text, claim_value_eur)
 
 
-def run(raw_input: str) -> dict:
+def needs_review(a: dict, b: dict, claim_value_eur: float | None = None) -> bool:
+    return (
+        float(a.get("confidence", 0.0)) < REVIEW_BELOW_CONFIDENCE
+        or (claim_value_eur is not None and claim_value_eur > REVIEW_ABOVE_VALUE_EUR)
+        or b["decision"] == "escalate"
+        or not b["in_scope"]
+        or "error" in b
+    )
+
+
+def run(raw_input: str, claim_text: str | None = None, claim_value_eur: float | None = None) -> dict:
+    # TODO (with component A): raw_input becomes the photo path, and claim_text the customer's text.
+    # Until then the template's text input doubles as the claim text.
     text = read_input(raw_input)
+    claim = text if claim_text is None else claim_text
     a = component_a(text)
-    b = component_b(text, a)
+    b = component_b(claim, a, claim_value_eur)
+    usage = {k: b.pop(k) for k in ("tokens", "input_tokens", "output_tokens", "cost_eur", "latency_s")}
     features = input_features(text) | {"confidence": a["confidence"]}
     return {
         "input_summary": text[:120],
         "features": features,
         "outputs": {"component_a": a, "component_b": b},
-        "versions": VERSIONS,
-        "review": a["confidence"] < REVIEW_BELOW_CONFIDENCE,
-        "tokens": b["tokens"],
-        "cost_eur": 0.0,
+        "versions": VERSIONS | {"component_b": b["version"]},
+        "review": needs_review(a, b, claim_value_eur),
+        "tokens": usage["tokens"],
+        "cost_eur": usage["cost_eur"],
     }
