@@ -3,7 +3,7 @@
 # Render also creates the logs database declared at the end of this file.
 services:
   - type: web
-    name: daiist-group-project
+    name: damage-claim-triage
     runtime: python          # Python version from .python-version, packages from uv.lock
     plan: free
     region: frankfurt

@@ -20,31 +20,52 @@ import pipeline
 env.load_env()
 LOG_TARGET = logbook.start()
 
-TITLE = "Your product's name"  # TODO
-DESCRIPTION = "One sentence: who it is for and what it does."  # TODO
+TITLE = "Damage Claim Triage"
+DESCRIPTION = (
+    "For claims agents: upload the customer's photo of the damaged parcel and their message, "
+    "and get a drafted decision (approve / deny / escalate) with a reply. Uncertain or "
+    "high-value claims are sent to a person."
+)
 
 
-def serve(raw_input: str) -> dict:
-    """Run one request through the pipeline, log it, and return the logged record."""
+def serve(raw_input: str, claim_value_eur: float | None = None) -> dict:
+    """Run one request through the pipeline, log it, and return the logged record.
+
+    `raw_input` is one string: a photo path, `photo path | claim text`, or text only
+    (the convention of pipeline.py and eval/cases.csv). check.py calls this directly.
+    """
     started = time.perf_counter()
-    result = pipeline.run(raw_input)
+    result = pipeline.run(raw_input, claim_value_eur=claim_value_eur)
     return logbook.log_request(result | {"latency_s": round(time.perf_counter() - started, 3)})
 
 
 # --- App tab -----------------------------------------------------------------
 
-def on_run(raw_input):
-    if raw_input is None or not str(raw_input).strip():
-        raise gr.Error("Give me an input first.")
-    record = serve(raw_input)
-    outputs = record["outputs"]
+def _present(record: dict) -> tuple:
+    a, b = record["outputs"]["component_a"], record["outputs"]["component_b"]
     status = "⚠️ **Sent to a person for review.**" if record["review"] else "✅ Handled automatically."
+    decision = f"**Decision: {b['decision'].upper()}**  \n{b.get('reason', '')}"
     return (
-        outputs["component_a"],
-        outputs["component_b"]["reply"],
+        a,
+        decision,
+        b["reply"],
         f"{status}  Latency {record['latency_s']} s, cost €{record['cost_eur']:.4f}.",
         record["id"],
     )
+
+
+def on_run(photo, claim, value):
+    if photo is None and not str(claim or "").strip():
+        raise gr.Error("Upload a photo of the parcel (and ideally the customer's message) first.")
+    combined = f"{photo} | {claim or ''}" if photo else str(claim)
+    return _present(serve(combined, claim_value_eur=float(value) if value else None))
+
+
+def on_run_api(raw_input):
+    """The /run endpoint check.py calls, with one input string from eval/cases.csv."""
+    if raw_input is None or not str(raw_input).strip():
+        raise gr.Error("Give me an input first.")
+    return serve(str(raw_input))
 
 
 def on_feedback(request_id, value):
@@ -81,19 +102,33 @@ with gr.Blocks(title=TITLE) as demo:
 
     with gr.Tab("App"):
         request_id = gr.State("")
-        # TODO: your input. For images: gr.Image(type="filepath"); for files: gr.File(type="filepath").
-        raw_input = gr.Textbox(label="Customer message", lines=4)
-        run_button = gr.Button("Run", variant="primary")
         with gr.Row():
-            out_a = gr.JSON(label="Component A")
-            out_b = gr.Textbox(label="Component B", lines=4)
-        status = gr.Markdown()
-        with gr.Row():
-            up = gr.Button("👍")
-            down = gr.Button("👎")
-        run_button.click(on_run, raw_input, [out_a, out_b, status, request_id], api_name="run")
+            with gr.Column():
+                photo = gr.Image(label="Photo of the parcel", type="filepath", height=300)
+                claim = gr.Textbox(label="Customer's message", lines=3,
+                                   placeholder="e.g. The box arrived crushed and the mug inside is broken.")
+                value = gr.Number(label="Order value (€, optional)", value=None, precision=2)
+                run_button = gr.Button("Assess claim", variant="primary")
+            with gr.Column():
+                out_decision = gr.Markdown(label="Decision")
+                out_reply = gr.Textbox(label="Reply to the customer", lines=5)
+                status = gr.Markdown()
+                out_a = gr.JSON(label="What the vision model saw")
+                with gr.Row():
+                    up = gr.Button("👍")
+                    down = gr.Button("👎")
+        run_button.click(on_run, [photo, claim, value],
+                         [out_a, out_decision, out_reply, status, request_id], api_name=False)
         up.click(lambda rid: on_feedback(rid, +1), request_id, None, api_name=False)
         down.click(lambda rid: on_feedback(rid, -1), request_id, None, api_name=False)
+
+        # The /run endpoint for check.py: one input string, the whole logged record back.
+        # The row is invisible but the endpoint is real.
+        with gr.Row(visible=False):
+            api_in = gr.Textbox()
+            api_out = gr.JSON()
+            api_button = gr.Button()
+            api_button.click(on_run_api, api_in, api_out, api_name="run")
 
     with gr.Tab("Monitoring"):
         refresh = gr.Button("Refresh")

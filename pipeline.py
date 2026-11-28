@@ -75,13 +75,14 @@ def component_b(claim_text: str, a: dict, claim_value_eur: float | None = None) 
 
 
 def input_features(image_path: str | None, claim_text: str) -> dict[str, float]:
-    """Numbers that describe the input, for the drift check. Same keys for every request."""
+    """Numbers that describe the input, for the drift check. Same keys for every request.
+
+    Only photo features (and A's confidence, added in run()): the reference set is
+    photos without claim text, so a text feature like word count would differ from
+    real cases by construction and make the drift alert fire on normal traffic.
+    """
     photo = vision.features(image_path) if image_path else {"brightness": 0.0, "megapixels": 0.0}
-    return {
-        "has_photo": 1.0 if image_path else 0.0,
-        "n_words": float(len(claim_text.split())),
-        **photo,
-    }
+    return {"has_photo": 1.0 if image_path else 0.0, **photo}
 
 
 def needs_review(a: dict, b: dict, claim_value_eur: float | None = None) -> bool:
